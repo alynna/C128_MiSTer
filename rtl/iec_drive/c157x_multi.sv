@@ -20,11 +20,13 @@ module c157x_multi #(parameter PARPORT=1,DRIVES=2)
 	input   [1:0] drv_mode[NDR],
 
 	input         pause,
-	// input   [N:0] gcr_mode,
 
 	input   [N:0] img_mounted,
 	input         img_readonly,
 	input  [31:0] img_size,
+	input   [N:0] img_ds,
+	input   [N:0] img_gcr,
+	input   [N:0] img_mfm,
 
 	output  [N:0] led,
 
@@ -55,7 +57,7 @@ module c157x_multi #(parameter PARPORT=1,DRIVES=2)
 	output  [7:0] sd_buff_din[NDR],
 	input         sd_buff_wr,
 
-   input   [1:0] rom_sel,
+	input   [1:0] rom_sel,
 	input  [14:0] rom_addr,
 	input   [7:0] rom_data,
 	input         rom_wr
@@ -185,9 +187,9 @@ always @(posedge clk) begin
 end
 
 wire [N:0] iec_data_d, iec_clk_d, iec_fclk_d;
-assign     iec_clk_o  = &{iec_clk_d  | reset_drv};
-assign     iec_data_o = &{iec_data_d | reset_drv};
-assign     iec_fclk_o = &{iec_fclk_d | reset_drv};
+iecdrv_reset_filter #(NDR) (clk, reset_drv, iec_clk_d, iec_clk_o);
+iecdrv_reset_filter #(NDR) (clk, reset_drv, iec_data_d, iec_data_o);
+iecdrv_reset_filter #(NDR) (clk, reset_drv, iec_fclk_d, iec_fclk_o);
 
 wire [N:0] ext_en;
 wire [7:0] par_data_d[NDR];
@@ -213,8 +215,6 @@ generate
 			.reset(reset_drv[i]),
 			.drv_mode(drv_mode[i]),
 
-			// .gcr_mode(gcr_mode[i]),
-
 			.ce(ce),
 			.wd_ce(wd_ce),
 			.ph2_r(ph2_r),
@@ -223,6 +223,9 @@ generate
 			.img_mounted(img_mounted[i]),
 			.img_readonly(img_readonly),
 			.img_size(img_size),
+			.img_ds(img_ds[i]),
+			.img_gcr(img_gcr[i]),
+			.img_mfm(img_mfm[i]),
 
 			.led(led_drv[i]),
 

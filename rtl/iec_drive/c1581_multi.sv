@@ -8,7 +8,7 @@
 //-------------------------------------------------------------------------------
 
 
-module c1581_multi #(parameter PARPORT=1,DUALROM=1,DRIVES=3)
+module c1581_multi #(parameter PARPORT=1,DRIVES=2)
 (
 	//clk ports
 	input         clk,
@@ -68,8 +68,6 @@ iecdrv_sync fclk_sync(clk, iec_fclk_i, iec_fclk);
 wire [N:0] reset_drv;
 iecdrv_sync #(NDR) rst_sync(clk, reset, reset_drv);
 
-wire stdrom = (DUALROM || PARPORT) ? rom_std : 1'b1;
-
 reg ph2_r;
 reg ph2_f;
 reg wd_ce;
@@ -92,36 +90,16 @@ always @(posedge clk) begin
 end
 
 wire [7:0] rom_do;
-generate
-	if(PARPORT || DUALROM) begin
-		iecdrv_mem #(8,15,"rtl/iec_drive/c1581_rom.mif") rom
-		(
-			.clock_a(clk_sys),
-			.address_a(rom_addr),
-			.data_a(rom_data),
-			.wren_a(rom_wr),
-
-			.clock_b(clk),
-			.address_b(mem_a),
-			.q_b(rom_do)
-		);
-	end
-	else begin
-		assign rom_do = romstd_do;
-	end
-endgenerate
-
-wire [7:0] romstd_do;
-iecdrv_mem #(8,15,"rtl/iec_drive/c1581_rom.mif") romstd
+iecdrv_mem #(8,15,"rtl/iec_drive/c1581_rom.mif") rom
 (
 	.clock_a(clk_sys),
 	.address_a(rom_addr),
 	.data_a(rom_data),
-	.wren_a((DUALROM || PARPORT) ? 1'b0 : rom_wr),
+	.wren_a(rom_wr),
 
 	.clock_b(clk),
 	.address_b(mem_a),
-	.q_b(romstd_do)
+	.q_b(rom_do)
 );
 
 reg  [14:0] mem_a;
@@ -139,14 +117,14 @@ always @(posedge clk) begin
 	endcase
 	
 	case(state)
-		3,4,5,6: drv_data[state[1:0] - 2'd3] <= stdrom ? romstd_do : rom_do;
+		3,4,5,6: drv_data[state[1:0] - 2'd3] <= rom_do;
 	endcase
 end
 
 wire [N:0] iec_data_d, iec_clk_d, iec_fclk_d;
-assign     iec_clk_o  = &{iec_clk_d  | reset_drv};
-assign     iec_fclk_o = &{iec_fclk_d | reset_drv};
-assign     iec_data_o = &{iec_data_d | reset_drv};
+iecdrv_reset_filter #(NDR) (clk, reset_drv, iec_clk_d, iec_clk_o);
+iecdrv_reset_filter #(NDR) (clk, reset_drv, iec_data_d, iec_data_o);
+iecdrv_reset_filter #(NDR) (clk, reset_drv, iec_fclk_d, iec_fclk_o);
 
 wire [7:0] par_data_d[NDR];
 wire [N:0] par_stb_d;

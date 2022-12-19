@@ -168,7 +168,7 @@ assign LED = (led_overtake & led_state) | (~led_overtake & {1'b0,led_locked,1'b0
 
 wire btn_r, btn_o, btn_u;
 `ifdef MISTER_DUAL_SDRAM
-	assign {btn_r,btn_o,btn_u} = {mcp_btn[1],mcp_btn[2],mcp_btn[0]};
+	assign {btn_r,btn_o,btn_u} = SW[3] ? {mcp_btn[1],mcp_btn[2],mcp_btn[0]} : ~{SDRAM2_DQ[9],SDRAM2_DQ[13],SDRAM2_DQ[11]};
 `else
 	assign {btn_r,btn_o,btn_u} = ~{BTN_RESET,BTN_OSD,BTN_USER} | {mcp_btn[1],mcp_btn[2],mcp_btn[0]};
 `endif
@@ -218,7 +218,7 @@ wire [31:0] gp_out;
 wire  [1:0] io_ver = 1; // 0 - obsolete. 1 - optimized HPS I/O. 2,3 - reserved for future.
 wire        io_wait;
 wire        io_wide;
-wire [15:0] io_dout;
+wire [15:0] io_dout;                  
 wire [15:0] io_din = gp_outr[15:0];
 wire        io_clk = gp_outr[17];
 wire        io_ss0 = gp_outr[18];
@@ -270,6 +270,7 @@ reg [15:0] cfg;
 
 reg        cfg_set      = 0;
 wire       vga_fb       = cfg[12] | vga_force_scaler;
+wire [1:0] hdmi_limited = {cfg[11],cfg[8]};
 
 `ifdef MISTER_DEBUG_NOHDMI
 wire       direct_video = 1;
@@ -277,11 +278,12 @@ wire       direct_video = 1;
 wire       direct_video = cfg[10];
 `endif
 
+wire       dvi_mode     = cfg[7];
 wire       audio_96k    = cfg[6];
 wire       csync_en     = cfg[3];
-wire       ypbpr_en     = cfg[5];
 wire       io_osd_vga   = io_ss1 & ~io_ss2;
 `ifndef MISTER_DUAL_SDRAM
+	wire    ypbpr_en     = cfg[5];
 	wire    sog          = cfg[9];
 	wire    vga_scaler   = cfg[2] | vga_force_scaler;
 `endif
@@ -293,8 +295,8 @@ reg [31:0] cfg_custom_p2;
 reg  [4:0] vol_att;
 initial vol_att = 5'b11111;
 
-reg  [11:0] coef_addr;
-reg  [9:0] coef_data;
+reg  [9:0] coef_addr;
+reg  [8:0] coef_data;
 reg        coef_wr = 0;
 
 wire[12:0] ARX, ARY;
@@ -302,12 +304,13 @@ reg [11:0] VSET = 0, HSET = 0;
 reg        FREESCALE = 0;
 reg  [2:0] scaler_flt;
 reg        lowlat = 0;
-reg        cfg_done = 0;
+reg        cfg_dis = 0;
 
 reg        vs_wait = 0;
 reg [11:0] vs_line = 0;
 
 reg        scaler_out = 0;
+reg        vrr_mode = 0;
 
 reg [31:0] aflt_rate = 7056000;
 reg [39:0] acx  = 4258969;
@@ -322,16 +325,16 @@ reg [12:0] arc1x = 0;
 reg [12:0] arc1y = 0;
 reg [12:0] arc2x = 0;
 reg [12:0] arc2y = 0;
-reg [15:0] io_dout_sys;
 
 always@(posedge clk_sys) begin
 	reg  [7:0] cmd;
 	reg        has_cmd;
+	reg        old_strobe;
 	reg  [7:0] cnt = 0;
 	reg        vs_d0,vs_d1,vs_d2;
 	reg  [4:0] acx_att;
-	reg  [7:0] fb_crc;
 
+	old_strobe <= io_strobe;
 	coef_wr <= 0;
 
 `ifndef MISTER_DEBUG_NOHDMI
@@ -344,11 +347,9 @@ always@(posedge clk_sys) begin
 		areset <= 0;
 		acx_att <= 0;
 		acx <= acx >> acx_att;
-		io_dout_sys <= 0;
 	end
 	else
-	if(io_strobe) begin
-		io_dout_sys <= 0;
+	if(~old_strobe & io_strobe) begin
 		if(!has_cmd) begin
 			has_cmd <= 1;
 			cmd <= io_din[7:0];
@@ -365,10 +366,6 @@ always@(posedge clk_sys) begin
 				acy2 <= -24'd2023767;
 				areset <= 1;
 			end
-			if(io_din[7:0] == 'h20) io_dout_sys <= 1;
-`ifndef MISTER_DEBUG_NOHDMI
-			if(io_din[7:0] == 'h40) io_dout_sys <= fb_crc;
-`endif
 		end
 		else begin
 			cnt <= cnt + 1'd1;
@@ -381,14 +378,14 @@ always@(posedge clk_sys) begin
 				cfg_set <= 0;
 				if(cnt<8) begin
 					case(cnt[2:0])
-						0: {HDMI_PR,WIDTH} <= {io_din[15], io_din[11:0]};
-						1: HFP             <= io_din[11:0];
-						2: HS              <= {io_din[15], io_din[11:0]};
-						3: HBP             <= io_din[11:0];
-						4: HEIGHT          <= io_din[11:0];
-						5: VFP             <= io_din[11:0];
-						6: VS              <= {io_din[15],io_din[11:0]};
-						7: VBP             <= io_din[11:0];
+						0: if(WIDTH  != io_din[11:0]) WIDTH  <= io_din[11:0];
+						1: if(HFP    != io_din[11:0]) HFP    <= io_din[11:0];
+						2: if(HS     != io_din[11:0]) HS     <= io_din[11:0];
+						3: if(HBP    != io_din[11:0]) HBP    <= io_din[11:0];
+						4: if(HEIGHT != io_din[11:0]) HEIGHT <= io_din[11:0];
+						5: if(VFP    != io_din[11:0]) VFP    <= io_din[11:0];
+						6: if(VS     != io_din[11:0]) VS     <= io_din[11:0];
+						7: if(VBP    != io_din[11:0]) VBP    <= io_din[11:0];
 					endcase
 `ifndef MISTER_DEBUG_NOHDMI
 					if(cnt == 1) begin
@@ -405,7 +402,7 @@ always@(posedge clk_sys) begin
 						cfg_custom_t <= ~cfg_custom_t;
 						cnt[2:0] <= 3'b100;
 					end
-					if(cnt == 8) {lowlat,cfg_done} <= {io_din[15],1'b1};
+					if(cnt == 8) {lowlat,cfg_dis} <= io_din[15:14];
 `endif
 				end
 			end
@@ -427,8 +424,8 @@ always@(posedge clk_sys) begin
 			if(cmd == 'h26) vol_att <= io_din[4:0];
 			if(cmd == 'h27) VSET <= io_din[11:0];
 			if(cmd == 'h2A) begin
-				if(cnt[0]) {coef_wr,coef_data} <= {1'b1,io_din[9:0]};
-				else coef_addr <= io_din[11:0];
+				if(cnt[0]) {coef_wr,coef_data} <= {1'b1,io_din[8:0]};
+				else coef_addr <= io_din[9:0];
 			end
 			if(cmd == 'h2B) scaler_flt <= io_din[2:0];
 			if(cmd == 'h37) {FREESCALE,HSET} <= {io_din[15],io_din[11:0]};
@@ -462,29 +459,9 @@ always@(posedge clk_sys) begin
 			end
 `ifndef MISTER_DEBUG_NOHDMI
 			if(cmd == 'h3E) {shadowmask_wr,shadowmask_data} <= {1'b1, io_din};
-			if(cmd == 'h40) begin
-				case(cnt[3:0])
-					0: io_dout_sys <= {arxy, arx};
-					1: io_dout_sys <= {arxy, ary};
-					2: io_dout_sys <= {LFB_EN, FB_EN, FB_FMT};
-					3: io_dout_sys <= FB_WIDTH;
-					4: io_dout_sys <= FB_HEIGHT;
-					5: io_dout_sys <= FB_BASE[15:0];
-					6: io_dout_sys <= FB_BASE[31:16];
-					7: io_dout_sys <= FB_STRIDE;
-				endcase
-			end
 `endif
 		end
 	end
-
-`ifndef MISTER_DEBUG_NOHDMI
-	fb_crc <= {LFB_EN, FB_EN, FB_FMT}
-				^ FB_WIDTH[7:0]  ^ FB_WIDTH[11:8] 
-				^ FB_HEIGHT[7:0] ^ FB_HEIGHT[11:8] 
-				^ arx[7:0] ^ arx[11:8] ^ arxy
-				^ ary[7:0] ^ ary[11:8];
-`endif
 
 	vs_d0 <= HDMI_TX_VS;
 	if(vs_d0 == HDMI_TX_VS) vs_d1 <= vs_d0;
@@ -658,11 +635,6 @@ wire clk_hdmi  = hdmi_clk_out;
 ascal 
 #(
 	.RAMBASE(32'h20000000),
-`ifdef MISTER_SMALL_VBUF
-	.RAMSIZE(32'h00100000),
-`else
-	.RAMSIZE(32'h00800000),
-`endif
 `ifndef MISTER_FB
 	.PALETTE2("false"),
 `else
@@ -676,7 +648,7 @@ ascal
 `ifdef MISTER_DOWNSCALE_NN
 	.DOWNSCALE_NN("true"),
 `endif
-	.FRAC(8),
+	.FRAC(6),
 	.N_DW(128),
 	.N_AW(28)
 )
@@ -712,18 +684,20 @@ ascal
 	.o_vbl    (hdmi_vbl),
 	.o_brd    (hdmi_brd),
 	.o_lltune (lltune),
-	.htotal   (WIDTH + HFP + HBP + HS[11:0]),
+	.htotal   (WIDTH + HFP + HBP + HS),
 	.hsstart  (WIDTH + HFP),
-	.hsend    (WIDTH + HFP + HS[11:0]),
+	.hsend    (WIDTH + HFP + HS),
 	.hdisp    (WIDTH),
 	.hmin     (hmin),
 	.hmax     (hmax),
-	.vtotal   (HEIGHT + VFP + VBP + VS[11:0]),
+	.vtotal   (HEIGHT + VFP + VBP + VS),
 	.vsstart  (HEIGHT + VFP),
-	.vsend    (HEIGHT + VFP + VS[11:0]),
+	.vsend    (HEIGHT + VFP + VS),
 	.vdisp    (HEIGHT),
 	.vmin     (vmin),
 	.vmax     (vmax),
+	.vrr      (vrr_mode),
+	.vrrmax   (HEIGHT + VBP + VS[11:0] + 12'd1),
 
 	.mode     ({~lowlat,LFB_EN ? LFB_FLT : |scaler_flt,2'b00}),
 	.poly_clk (clk_sys),
@@ -833,40 +807,37 @@ reg [11:0] vmax;
 reg [11:0] hdmi_height;
 reg [11:0] hdmi_width;
 
-reg [11:0] arx;
-reg [11:0] ary;
-reg        arxy;
-
 always @(posedge clk_vid) begin
 	reg [11:0] hmini,hmaxi,vmini,vmaxi;
-	reg [11:0] wcalc,videow;
-	reg [11:0] hcalc,videoh;
+	reg [11:0] wcalc,videow,arx;
+	reg [11:0] hcalc,videoh,ary;
 	reg  [2:0] state;
+	reg        xy;
 
 	hdmi_height <= (VSET && (VSET < HEIGHT)) ? VSET : HEIGHT;
-	hdmi_width  <= (HSET && (HSET < WIDTH))  ? HSET << HDMI_PR : WIDTH << HDMI_PR;
+	hdmi_width  <= (HSET && (HSET < WIDTH))  ? HSET : WIDTH;
 
 	if(!ARY) begin
 		if(ARX == 1) begin
-			arx  <= arc1x[11:0];
-			ary  <= arc1y[11:0];
-			arxy <= arc1x[12] | arc1y[12];
+			arx <= arc1x[11:0];
+			ary <= arc1y[11:0];
+			xy  <= arc1x[12] | arc1y[12];
 		end
 		else if(ARX == 2) begin
-			arx  <= arc2x[11:0];
-			ary  <= arc2y[11:0];
-			arxy <= arc2x[12] | arc2y[12];
+			arx <= arc2x[11:0];
+			ary <= arc2y[11:0];
+			xy  <= arc2x[12] | arc2y[12];
 		end
 		else begin
-			arx  <= 0;
-			ary  <= 0;
-			arxy <= 0;
+			arx <= 0;
+			ary <= 0;
+			xy  <= 0;
 		end
 	end
 	else begin
-		arx  <= ARX[11:0];
-		ary  <= ARY[11:0];
-		arxy <= ARX[12] | ARY[12];
+		arx <= ARX[11:0];
+		ary <= ARY[11:0];
+		xy  <= ARX[12] | ARY[12];
 	end
 	
 	ar_md_start <= 0;
@@ -884,7 +855,7 @@ always @(posedge clk_vid) begin
 				hcalc <= hdmi_height;
 				state <= 6;
 			end
-			else if(arxy) begin
+			else if(xy) begin
 				wcalc <= arx;
 				hcalc <= ary;
 				state <= 6;
@@ -1310,6 +1281,7 @@ wire vga_cs_osd;
 csync csync_vga(clk_vid, vga_hs_osd, vga_vs_osd, vga_cs_osd);
 
 `ifndef MISTER_DUAL_SDRAM
+	wire VGA_DISABLE;
 	wire [23:0] vgas_o;
 	wire vgas_hs, vgas_vs, vgas_cs;
 	vga_out vga_scaler_out
@@ -1344,11 +1316,11 @@ csync csync_vga(clk_vid, vga_hs_osd, vga_vs_osd, vga_cs_osd);
 
 	wire cs1 = (vga_fb | vga_scaler) ? vgas_cs : vga_cs;
 
-	assign VGA_VS = (VGA_EN | SW[3]) ? 1'bZ      :((((vga_fb | vga_scaler) ? ~vgas_vs : ~vga_vs) | csync_en) ^ VS[12]);
-	assign VGA_HS = (VGA_EN | SW[3]) ? 1'bZ      : (((vga_fb | vga_scaler) ? (csync_en ? ~vgas_cs : ~vgas_hs) : (csync_en ? ~vga_cs : ~vga_hs)) ^ HS[12]);
-	assign VGA_R  = (VGA_EN | SW[3]) ? 6'bZZZZZZ :   (vga_fb | vga_scaler) ? vgas_o[23:18] : vga_o[23:18];
-	assign VGA_G  = (VGA_EN | SW[3]) ? 6'bZZZZZZ :   (vga_fb | vga_scaler) ? vgas_o[15:10] : vga_o[15:10];
-	assign VGA_B  = (VGA_EN | SW[3]) ? 6'bZZZZZZ :   (vga_fb | vga_scaler) ? vgas_o[7:2]   : vga_o[7:2]  ;
+	assign VGA_VS = (VGA_EN | SW[3]) ? 1'bZ      : (((vga_fb | vga_scaler) ? (~vgas_vs ^ VS[12])                         : VGA_DISABLE ? 1'd1 : ~vga_vs) | csync_en);
+	assign VGA_HS = (VGA_EN | SW[3]) ? 1'bZ      :  ((vga_fb | vga_scaler) ? ((csync_en ? ~vgas_cs : ~vgas_hs) ^ HS[12]) : VGA_DISABLE ? 1'd1 : (csync_en ? ~vga_cs : ~vga_hs));
+	assign VGA_R  = (VGA_EN | SW[3]) ? 6'bZZZZZZ :   (vga_fb | vga_scaler) ? vgas_o[23:18]                               : VGA_DISABLE ? 6'd0 : vga_o[23:18];
+	assign VGA_G  = (VGA_EN | SW[3]) ? 6'bZZZZZZ :   (vga_fb | vga_scaler) ? vgas_o[15:10]                               : VGA_DISABLE ? 6'd0 : vga_o[15:10];
+	assign VGA_B  = (VGA_EN | SW[3]) ? 6'bZZZZZZ :   (vga_fb | vga_scaler) ? vgas_o[7:2]                                 : VGA_DISABLE ? 6'd0 : vga_o[7:2]  ;
 `endif
 
 reg video_sync = 0;
@@ -1580,6 +1552,10 @@ emu emu
 	.VGA_DE(de_emu),
 	.VGA_F1(f1),
 	.VGA_SCALER(vga_force_scaler),
+
+`ifndef MISTER_DUAL_SDRAM
+	.VGA_DISABLE(VGA_DISABLE),
+`endif
 
 	.HDMI_WIDTH(direct_video ? 12'd0 : hdmi_width),
 	.HDMI_HEIGHT(direct_video ? 12'd0 : hdmi_height),

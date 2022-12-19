@@ -26,7 +26,6 @@ module c157x_drv #(parameter DRIVE)
 	input         reset,
 
 	input   [1:0] drv_mode,
-	// input         gcr_mode,
 
 	input         ce,
 	input         wd_ce,
@@ -36,6 +35,9 @@ module c157x_drv #(parameter DRIVE)
 	input         img_mounted,
 	input         img_readonly,
 	input  [31:0] img_size,
+	input         img_ds,
+	input         img_gcr,
+	input         img_mfm,
 
 	output        led,
 
@@ -95,27 +97,26 @@ always @(posedge clk) begin
 end
 
 // reset drive when drive mode changes
-reg  drv_mode_chg = 0;
-wire reset_drv = reset | drv_mode_chg;
+wire reset_drv;
 always @(posedge clk) begin
 	reg [1:0] last_drv_mode;
-	reg [7:0] reset_hold;
-	
+	reg [3:0] reset_hold;
+
 	if (reset) begin
 		last_drv_mode <= drv_mode;
-		drv_mode_chg  <= 0;
 		reset_hold    <= 0;
+		reset_drv	  <= 1;
 	end
-	else if (ph2_r[1]) begin
+	else if (ph2_r[0]) begin
 		last_drv_mode <= drv_mode;
 		if (last_drv_mode != drv_mode) begin
-			reset_hold   <= '1;
-			drv_mode_chg <= 1;
+			reset_hold <= '1;
+			reset_drv  <= 1;
 		end
-		else if (|reset_hold)
-			reset_hold   <= reset_hold - 1'd1;
+		else if (reset_hold)
+			reset_hold <= reset_hold - 1'd1;
 		else
-			drv_mode_chg <= 0;
+			reset_drv  <= 0;
 	end
 end
 
@@ -123,6 +124,7 @@ wire       mode, wgate;
 wire [1:0] stp;
 wire       mtr;
 wire       act;
+wire       fdc_busy;
 wire [1:0] freq;
 
 c157x_logic #(.DRIVE(DRIVE)) c157x_logic
@@ -160,6 +162,7 @@ c157x_logic #(.DRIVE(DRIVE)) c157x_logic
 	.side(side),
 	.mode(mode),
 	.wgate(wgate),
+	.fdc_busy(fdc_busy),
 
 	// .din(dgcr_do),
 	// .dout(gcr_di),
@@ -172,13 +175,16 @@ c157x_logic #(.DRIVE(DRIVE)) c157x_logic
 	// .sync_n(dgcr_sync_n),
 	// .byte_n(dgcr_byte_n),
 
+	.hinit(hinit),
 	.hclk(hclk),
 	.hf(hf),
 	.ht(ht),
 	.tr00_sense(~|track),
 	.index_sense(index),
 	.drive_enable(drive_enable),
-	.disk_present(disk_present)
+	.disk_present(disk_present),
+
+	.img_mfm(img_mfm)
 );
 
 // wire  [7:0] gcr_di;
@@ -245,7 +251,7 @@ iecdrv_sync busy_sync(clk, busy, sd_busy);
 // 	.sd_buff_wr(sd_ack & sd_buff_wr /*& gcr_mode*/)
 // );
 
-wire hclk, hf, ht, index, we, write, sd_update;
+wire hinit, hclk, hf, ht, index, we, write, sd_update;
 wire drive_enable = disk_present & mtr;
 
 c157x_heads #(.DRIVE(DRIVE), .TRACK_BUF_LEN(SD_BLK_CNT_157X*256)) c157x_heads
@@ -254,12 +260,17 @@ c157x_heads #(.DRIVE(DRIVE), .TRACK_BUF_LEN(SD_BLK_CNT_157X*256)) c157x_heads
 	.ce(ce),
 	.reset(reset_drv),
 	.enable(drive_enable),
+	.img_ds(img_ds),
+	.img_gcr(img_gcr),
+	.img_mfm(img_mfm),
 
 	.freq(freq),
+	.side(side),
 	.mode(mode),
 	.wgate(wgate),
 	.write(write),
 
+	.hinit(hinit),
 	.hclk(hclk),
 	.hf(hf),
 	.ht(ht),
@@ -319,7 +330,7 @@ always @(posedge clk) begin
 		track_modified <= 0;
 	end else begin
 		if (mtr) begin
-			if (move[0] && ~move[1] && track_num < 84) track_num <= track_num + 1'b1;
+			if (move[0] && !move[1] && track_num < 84) track_num <= track_num + 1'b1;
 			if (move[0] &&  move[1] && track_num > 0 ) track_num <= track_num - 1'b1;
 			if ((move[0] || side != side_old) && track_modified) begin
 				save_track <= ~save_track;
@@ -327,7 +338,7 @@ always @(posedge clk) begin
 			end
 		end
 
-		if (track_modified & ~write & ~act) begin	// stopping activity
+		if (track_modified && !write && !act && !fdc_busy && !sd_busy) begin	// stopping activity
 			save_track <= ~save_track;
 			track_modified <= 0;
 		end

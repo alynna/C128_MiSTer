@@ -7,7 +7,7 @@ set_global_assignment -name QIP_FILE rtl/85816/85816.qip
 set_global_assignment -name VHDL_FILE rtl/cpu_6510.vhd
 set_global_assignment -name VHDL_FILE rtl/cpu_z80.vhd
 set_global_assignment -name VHDL_FILE rtl/mmu8722.vhd
-set_global_assignment -name VERILOG_FILE rtl/mos6526.v
+set_global_assignment -name VERILOG_FILE rtl/mos6526_8520.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/rtcF83.sv
 set_global_assignment -name VERILOG_FILE rtl/sdram.v
 set_global_assignment -name VHDL_FILE rtl/dprom.vhd
@@ -18,10 +18,12 @@ set_global_assignment -name VHDL_FILE rtl/c1530.vhd
 set_global_assignment -name VERILOG_FILE rtl/c1351.v
 set_global_assignment -name VHDL_FILE rtl/video_sync.vhd
 set_global_assignment -name VHDL_FILE rtl/video_vicII_656x.vhd
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video_vicIIe_jb.sv
 set_global_assignment -name VHDL_FILE rtl/fpga64_rgbcolor.vhd
 set_global_assignment -name VHDL_FILE rtl/fpga64_keyboard.vhd
 set_global_assignment -name VHDL_FILE rtl/fpga64_buslogic.vhd
 set_global_assignment -name VHDL_FILE rtl/fpga64_sid_iec.vhd
 set_global_assignment -name VHDL_FILE rtl/rgbicolor.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/osdinfo.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/iec_io.sv
 set_global_assignment -name SYSTEMVERILOG_FILE c128.sv
